@@ -51,6 +51,20 @@ class KiloexAPIClient {
     this.initializeTradingConfig();
   }
 
+  // Helper function for number formatting
+  formatNumber(value) {
+    if (value >= 1000000000) {
+      return (value / 1000000000).toFixed(2) + "B";
+    }
+    if (value >= 1000000) {
+      return (value / 1000000).toFixed(2) + "M";
+    }
+    if (value >= 1000) {
+      return (value / 1000).toFixed(2) + "K";
+    }
+    return value.toFixed(2);
+  }
+
   initializeHeaders() {
     this.headers = {
       Accept: "application/json, text/plain, */*",
@@ -175,7 +189,12 @@ class KiloexAPIClient {
 
   handleError(error, message) {
     if (error?.response?.data?.msg) {
-      return colors.style(`${message}: ${error.response.data.msg}`, "error");
+      // Translate Chinese error message
+      let errorMsg = error.response.data.msg;
+      if (errorMsg.includes("余额不足")) {
+        errorMsg = "Insufficient balance";
+      }
+      return colors.style(`${message}: ${errorMsg}`, "error");
     }
     return colors.style(`${message}: ${error.message}`, "error");
   }
@@ -320,7 +339,6 @@ class KiloexAPIClient {
       return;
     }
 
-    // Skip tasks for join channel and speed up channel
     if (
       task.type === "subscribe_tg_channel" ||
       task.type === "speed_tg_channel"
@@ -330,7 +348,6 @@ class KiloexAPIClient {
 
     const taskName = this.getTaskTranslation(task.name);
 
-    // Skip if task is locked
     if (task.unlockId !== null) {
       logger.info(colors.style(`Task locked: ${taskName}`, "info"));
       return;
@@ -342,14 +359,18 @@ class KiloexAPIClient {
       if (task.type === "mining") {
         logger.info(
           colors.style(
-            `Mining progress: ${stats.mining}/${task.requirement[0].amount}`,
+            `Mining progress: ${this.formatNumber(
+              stats.mining
+            )}/${this.formatNumber(task.requirement[0].amount)}`,
             "info"
           )
         );
       } else if (task.type === "trade_coin") {
         logger.info(
           colors.style(
-            `Trading progress: ${stats.tradeVolume}/${task.requirement[0].amount}`,
+            `Trading progress: ${this.formatNumber(
+              stats.tradeVolume
+            )}/${this.formatNumber(task.requirement[0].amount)}`,
             "info"
           )
         );
@@ -367,9 +388,7 @@ class KiloexAPIClient {
     const isReported = await this.reportTask(account, task.id);
     if (isReported) {
       logger.success(colors.style(`Task reported: ${taskName}`, "success"));
-
       await this.sleep(2000);
-
       const isClaimed = await this.claimTask(account, task.id);
       if (isClaimed) {
         logger.success(
@@ -398,17 +417,23 @@ class KiloexAPIClient {
       // Display task statistics
       logger.info(colors.style("Task Statistics:", "menuTitle"));
       logger.info(
-        colors.style(`Trade Volume : ${taskList.stats.tradeVolume}`, "value")
+        colors.style(
+          `Trade Volume : ${this.formatNumber(taskList.stats.tradeVolume)}`,
+          "value"
+        )
       );
       logger.info(
-        colors.style(`Mining      : ${taskList.stats.mining}`, "value")
+        colors.style(
+          `Mining      : ${this.formatNumber(taskList.stats.mining)}`,
+          "value"
+        )
       );
       logger.info(
         colors.style(`Invites     : ${taskList.stats.inviteNum}`, "value")
       );
       logger.info(colors.style("===============================", "border"));
 
-      // Group tasks by type
+      // Group tasks and check requirements
       const miningTasks = taskList.data.filter((t) => t.type === "mining");
       const tradeTasks = taskList.data.filter((t) => t.type === "trade_coin");
       const inviteTasks = taskList.data.filter((t) => t.type === "referral");
@@ -423,7 +448,9 @@ class KiloexAPIClient {
         if (taskList.stats.mining < minMiningReq) {
           logger.info(
             colors.style(
-              `Does not meet the minimum requirement for mining task: ${taskList.stats.mining}/${minMiningReq}`,
+              `Does not meet the minimum requirement for mining task: ${this.formatNumber(
+                taskList.stats.mining
+              )}/${this.formatNumber(minMiningReq)}`,
               "info"
             )
           );
@@ -439,7 +466,9 @@ class KiloexAPIClient {
         if (taskList.stats.tradeVolume < minTradeReq) {
           logger.info(
             colors.style(
-              `Does not meet the minimum requirement for trading task: ${taskList.stats.tradeVolume}/${minTradeReq}`,
+              `Does not meet the minimum requirement for trading task: ${this.formatNumber(
+                taskList.stats.tradeVolume
+              )}/${this.formatNumber(minTradeReq)}`,
               "info"
             )
           );
@@ -478,7 +507,6 @@ class KiloexAPIClient {
   }
 
   async configureTradingSettings() {
-    // Load products first
     const productsLoaded = await this.loadProducts();
     if (!productsLoaded) {
       logger.error(
@@ -496,10 +524,7 @@ class KiloexAPIClient {
       return;
     }
 
-    // Get product selection
     const productId = await this.selectProduct();
-
-    // Configure other trading settings
     const tradingPrompts = [
       {
         type: "list",
@@ -542,7 +567,6 @@ class KiloexAPIClient {
   displayTradingConfig() {
     logger.info(colors.style("Selected Trading Configuration:", "menuTitle"));
 
-    // Display product configuration
     const productMode = this.tradingConfig.productId;
     if (productMode === "default") {
       logger.info(colors.style(`Product     : BTC (Default)`, "value"));
@@ -563,7 +587,10 @@ class KiloexAPIClient {
     }
 
     logger.info(
-      colors.style(`Margin      : ${this.tradingConfig.margin} USDT`, "value")
+      colors.style(
+        `Margin      : ${this.formatNumber(this.tradingConfig.margin)} USDT`,
+        "value"
+      )
     );
     logger.info(
       colors.style(`Leverage    : ${this.tradingConfig.leverage}x`, "value")
@@ -594,7 +621,6 @@ class KiloexAPIClient {
       if (checkResponse.status === 200 && checkResponse.data.status === true) {
         if (!checkResponse.data.data.length) {
           await this.sleep(2000);
-
           await axios.post(
             "https://opapi.kiloex.io/tg/referral/bind",
             {
@@ -627,65 +653,78 @@ class KiloexAPIClient {
   }
 
   async openOrder(account, positionType) {
-    let productId;
-    let productInfo;
+    try {
+      let productId;
+      let productInfo;
 
-    switch (this.tradingConfig.productId) {
-      case "default":
-        productId = 2; // BTC
-        productInfo = { base: "BTC", name: "BTCUSD" };
-        break;
+      switch (this.tradingConfig.productId) {
+        case "default":
+          productId = 2;
+          productInfo = { base: "BTC", name: "BTCUSD" };
+          break;
 
-      case "random":
-        productInfo = this.getRandomProduct();
-        productId = productInfo.id;
-        logger.info(
-          colors.style(
-            `Selected random product: ${productInfo.base} (${productInfo.name})`,
-            "info"
-          )
-        );
-        break;
+        case "random":
+          productInfo = this.getRandomProduct();
+          productId = productInfo.id;
+          logger.info(
+            colors.style(
+              `Selected random product: ${productInfo.base} (${productInfo.name})`,
+              "info"
+            )
+          );
+          break;
 
-      default:
-        productId = this.tradingConfig.productId;
-        productInfo = this.products.find((p) => p.id === productId);
-    }
+        default:
+          productId = this.tradingConfig.productId;
+          productInfo = this.products.find((p) => p.id === productId);
+      }
 
-    const result = await this.makeRequest("POST", API_ENDPOINTS.OPEN_ORDER, {
-      account: account,
-      productId: parseInt(productId),
-      margin: this.tradingConfig.margin,
-      leverage: this.tradingConfig.leverage,
-      positionType: positionType,
-      settleDelay: this.tradingConfig.settleDelay,
-    });
+      await this.sleep(5000);
 
-    if (!result.success) {
-      // Handle Chinese error messages
-      const errorMsg = result.error;
-      if (errorMsg.includes("余额不足")) {
-        logger.error(
-          colors.style(
-            `Error opening ${positionType} position: Insufficient balance`,
-            "txFailed"
-          )
-        );
-        // Tambahan informasi untuk membantu debugging
-        logger.info(
-          colors.style(
-            `Required margin: ${this.tradingConfig.margin} USDT`,
-            "info"
-          )
-        );
+      const result = await this.makeRequest("POST", API_ENDPOINTS.OPEN_ORDER, {
+        account: account,
+        productId: parseInt(productId),
+        margin: this.tradingConfig.margin,
+        leverage: this.tradingConfig.leverage,
+        positionType: positionType,
+        settleDelay: this.tradingConfig.settleDelay,
+      });
+
+      if (!result.success) {
+        const errorMsg = result.error;
+        if (errorMsg?.includes("余额不足")) {
+          logger.error(
+            colors.style(
+              `Error opening ${positionType} position: Insufficient balance. Required: ${this.formatNumber(
+                this.tradingConfig.margin
+              )} USDT`,
+              "txFailed"
+            )
+          );
+          return { success: false, error: "INSUFFICIENT_BALANCE" };
+        }
+
+        if (errorMsg?.includes("too quickly")) {
+          logger.info(
+            colors.style("Rate limit hit. Waiting 5 seconds...", "info")
+          );
+          await this.sleep(5000);
+          return await this.openOrder(account, positionType);
+        }
+
         return result;
       }
-    }
 
-    if (result.success) {
-      this.displayOrderInfo(result.data, positionType, productInfo);
+      if (result.success) {
+        this.displayOrderInfo(result.data, positionType, productInfo);
+      }
+      return result;
+    } catch (error) {
+      logger.error(
+        colors.style(`Error in openOrder: ${error.message}`, "error")
+      );
+      return { success: false, error: error.message };
     }
-    return result;
   }
 
   displayOrderInfo(orderData, positionType, productInfo) {
@@ -713,8 +752,28 @@ class KiloexAPIClient {
       );
     }
     logger.info(colors.style(`Leverage  : ${orderData.leverage}x`, "value"));
-    logger.info(colors.style(`Margin    : ${orderData.margin} USDT`, "value"));
+    logger.info(
+      colors.style(
+        `Margin    : ${this.formatNumber(orderData.margin)} USDT`,
+        "value"
+      )
+    );
     logger.info(colors.style(`Close Time: ${closeTime}`, "value"));
+  }
+
+  displayUserInfo(userData) {
+    logger.info(colors.style(`ID      : ${userData.id}`, "value"));
+    logger.info(colors.style(`Level   : ${userData.level}`, "value"));
+    logger.info(
+      colors.style(
+        `Balance : ${this.formatNumber(userData.balance)} USDT`,
+        "value"
+      )
+    );
+    logger.info(colors.style(`Stamina : ${userData.stamina}`, "value"));
+    logger.info(
+      colors.style(`EXP     : ${this.formatNumber(userData.exp)}`, "value")
+    );
   }
 
   async processAccount(account, name, index) {
@@ -723,10 +782,7 @@ class KiloexAPIClient {
         colors.style(`Processing Account ${index + 1} | ${name}`, "menuBorder")
       );
 
-      // Process tasks first
-      await this.processAllTasks(account, name);
-      await this.sleep(2000);
-
+      // Get user info first
       const userInfo = await this.getUserInfo(account, name);
       if (!userInfo.success) {
         logger.error(
@@ -740,73 +796,62 @@ class KiloexAPIClient {
 
       this.displayUserInfo(userInfo.data);
 
-      await this.sleep(2000);
-      await this.checkAndBindReferral(account);
-
-      if (userInfo.data.stamina > 0) {
-        await this.sleep(2000);
-        const miningResult = await this.updateMining(
-          account,
-          userInfo.data.stamina
-        );
-        if (!miningResult.success) {
-          logger.error(
-            colors.style(`Mining error: ${miningResult.error}`, "accountError")
-          );
-        }
-      }
-
-      if (userInfo.data.stamina > 0) {
-        await this.sleep(2000);
-        const miningResult = await this.updateMining(
-          account,
-          userInfo.data.stamina
-        );
-        if (!miningResult.success) {
-          logger.error(
-            colors.style(`Mining error: ${miningResult.error}`, "accountError")
-          );
-        }
-      }
-
-      // Check if balance is sufficient for both positions
-      const requiredBalance = this.tradingConfig.margin * 2; // Need double margin for both positions
-      if (userInfo.data.balance >= requiredBalance) {
+      // Check balance availability first
+      const requiredBalance = this.tradingConfig.margin * 2;
+      if (userInfo.data.balance < requiredBalance) {
         logger.info(
           colors.style(
-            "Balance sufficient for opening positions, starting...",
+            `Insufficient balance (${this.formatNumber(
+              userInfo.data.balance
+            )} USDT) for trading. Required: ${this.formatNumber(
+              requiredBalance
+            )} USDT`,
             "info"
           )
         );
+        return;
+      }
 
-        await this.sleep(2000);
-        const longResult = await this.openOrder(account, "long");
-        if (!longResult.success) {
-          if (longResult.error?.includes("余额不足")) {
-            logger.info(
-              colors.style(
-                "Skipping short position due to insufficient balance",
-                "info"
-              )
-            );
-            return;
-          }
-        }
+      // Process tasks
+      await this.sleep(3000);
+      await this.processAllTasks(account, name);
 
-        await this.sleep(2000);
+      // Process mining
+      if (userInfo.data.stamina > 0) {
+        await this.sleep(5000);
+        await this.updateMining(account, userInfo.data.stamina);
+      }
+
+      // Process referral in background
+      await this.sleep(2000);
+      await this.checkAndBindReferral(account);
+
+      // Add longer delay before trading
+      await this.sleep(5000);
+
+      // Start trading
+      logger.info(
+        colors.style(
+          `Starting trading with balance: ${this.formatNumber(
+            userInfo.data.balance
+          )} USDT`,
+          "info"
+        )
+      );
+
+      // Process long position
+      const longResult = await this.openOrder(account, "long");
+      await this.sleep(5000);
+
+      // Only proceed with short if we didn't get a permanent error
+      if (longResult.success || longResult.error === "INSUFFICIENT_BALANCE") {
         const shortResult = await this.openOrder(account, "short");
+
         if (longResult.success && shortResult.success) {
           logger.success(
             colors.style("Successfully opened both positions", "txSuccess")
           );
         }
-      } else {
-        logger.info(
-          colors.style(
-            `Insufficient balance (${userInfo.data.balance} USDT) for trading. Required: ${requiredBalance} USDT`,
-            "info"
-          )
-        );
       }
     } catch (error) {
       logger.error(
@@ -816,14 +861,6 @@ class KiloexAPIClient {
         )
       );
     }
-  }
-
-  displayUserInfo(userData) {
-    logger.info(colors.style(`ID      : ${userData.id}`, "value"));
-    logger.info(colors.style(`Level   : ${userData.level}`, "value"));
-    logger.info(colors.style(`Balance : ${userData.balance} USDT`, "value"));
-    logger.info(colors.style(`Stamina : ${userData.stamina}`, "value"));
-    logger.info(colors.style(`EXP     : ${userData.exp}`, "value"));
   }
 
   async startTradingCycle() {
