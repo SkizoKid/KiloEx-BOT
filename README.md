@@ -30,7 +30,7 @@ npm install
 
 ## Registration
 
-Before using the bot, you need to register on KiloEx platform:
+Before using the bot, you need to register on KiloEx platform and must open miniapp first you can use selenium if you use automation get query:
 
 1. Visit the registration link: [KiloEx Registration](https://t.me/KiloExTradeBot/mini?startapp=from-kiloextrade_rcode-n3m72b1h)
 2. Complete the registration process
